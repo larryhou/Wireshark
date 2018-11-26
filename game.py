@@ -105,7 +105,7 @@ class ClientApplication(NetworkApplication):
                 if content and content.find('\u0000') >= 0: raise RuntimeError()
                 return content
             except:
-                return binascii.hexlify(data).decode('utf-8')
+                return binascii.hexlify(data).decode('ascii')
         return data
 
     def check_qualified(self, protocol:ClientProtocol):
@@ -113,7 +113,7 @@ class ClientApplication(NetworkApplication):
 
     def decode_bytes(self, data:bytes, protocol:ClientProtocol):
         print('UnknownMessage', protocol)
-        print(binascii.hexlify(data).decode('utf-8'), '\n')
+        print(binascii.hexlify(data).decode('ascii'), '\n')
 
     def create_protocol(self)->ClientProtocol:
         return ClientProtocol()

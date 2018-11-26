@@ -19,7 +19,7 @@ class ArenaProtocol(ClientProtocol):
     def __init__(self):
         super(ArenaProtocol, self).__init__()
         self.ack:int = 0
-        self.ext:int = 0
+        self.client_frame:int = 0
 
     @property
     def header(self): return 12 + 2
@@ -29,7 +29,10 @@ class ArenaProtocol(ClientProtocol):
         self.cmd = stream.read_uint16()
         self.seq = stream.read_uint16()
         self.ack = stream.read_uint16()
-        self.ext = stream.read_uint32()
+        self.client_frame = stream.read_uint32()
+
+    def __repr__(self):
+        return 'cmd={:04X} seq={} ack={} len={} client_frame={}'.format(self.cmd, self.seq, self.ack, self.len, self.client_frame)
 
 class LogicProtocol(ClientProtocol):
     def __init__(self):

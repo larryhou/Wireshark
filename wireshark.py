@@ -192,15 +192,15 @@ class MemoryStream(object):
     def read_double(self) -> float:
         return struct.unpack('{}d'.format(self.endian), self.read(8))[0]
 
-    def read_hex(self, length:int):
+    def read_hex(self, length:int)->int:
         data = self.read(length)
         return binascii.hexlify(data).decode('ascii')
 
-    def read_sqlit_sint32(self):
+    def read_sqlit_sint32(self)->int:
         data = struct.pack('>I', self.read_sqlit_uint32())
         return struct.unpack('>i', data)[0]
 
-    def read_sqlit_uint32(self):
+    def read_sqlit_uint32(self)->int:
         byte0 = self.read_ubyte()
         if byte0 < 241: return byte0
         byte1 = self.read_ubyte()
@@ -216,11 +216,11 @@ class MemoryStream(object):
         if byte0 >= 251:
             return byte1 << 0 | byte2 << 8 | byte3 << 16 | byte4 << 24
 
-    def read_compact_sint32(self):
+    def read_compact_sint32(self)->int:
         data = struct.pack('>I', self.read_compact_uint32())
         return struct.unpack('>i', data)[0]
 
-    def read_compact_uint32(self):
+    def read_compact_uint32(self)->int:
         value, shift = 0, 0
         while True:
             byte = self.read_ubyte()
@@ -230,7 +230,7 @@ class MemoryStream(object):
         assert value < (1 << 32)
         return value
 
-    def read_string(self, length:int=0, encoding='utf-8'):
+    def read_string(self, length:int=0, encoding='utf-8')->str:
         assert length >= 0
         if not length:
             string = b''

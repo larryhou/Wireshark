@@ -186,11 +186,25 @@ class LogicApplication(ClientApplication):
 
     def create_protocol(self): return LogicProtocol()
 
+class ApolloHeader(TCPHeader):
+    def __init__(self):
+        super(ApolloHeader, self).__init__(None)
+
+    def decode(self, stream: MemoryStream):
+        self.src_port = stream.read_uint16()
+        self.dst_port = stream.read_uint16()
+        self.seq = stream.read_uint32()
+        self.ack = stream.read_uint32()
+
+    def __repr__(self):
+        return '[LWP] {:5} => {:5} seq={} ack={}'.format(self.src_port, self.dst_port, self.seq, self.ack)
+
 class ArenaApplication(ClientApplication):
     def __init__(self, session: UDPConnectionSession, debug: bool):
         super(ArenaApplication, self).__init__(session, debug)
         self.__shared_stream:MemoryStream = MemoryStream()
         self.bytes_commands:tuple[int, int] = (0x0306, 0x0307)
+
 
     def register_command_map(self):
         command_enum = self.module_map.get('GameSvrCmd')
@@ -248,6 +262,20 @@ class ArenaApplication(ClientApplication):
         else:
             super(ArenaApplication, self).decode_bytes(data, protocol)
         print()
+
+    def receive(self, data:bytes):
+        stream = self.__shared_stream
+        stream.position = 0
+        stream.write(data)
+        stream.position = 0
+        apollo = ApolloHeader()
+        apollo.decode(stream)
+        apollo.length = len(data)
+        apollo.payload = apollo.length - 24
+        apollo.data = data[20:-4]
+        print(apollo, '\n')
+        if apollo.payload > 0:
+            super(ArenaApplication, self).receive(apollo.data)
 
 if __name__ == '__main__':
     import argparse

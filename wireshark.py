@@ -538,7 +538,7 @@ class TCPConnectionSession(ConnectionSession):
                     for i in range(n):
                         header = packages[i]
                         print(header.ipv4.frame_number, '\n', header.ipv4, sep='')
-                        print(header, '\n')
+                        print(header)
                         if header.payload > 0: self.application.receive(header.data)
                     del packages[:n]
                     break
@@ -553,7 +553,7 @@ class UDPConnectionSession(ConnectionSession):
 
     def accept(self, header:UDPHeader):
         print(header.ipv4.frame_number, '\n', header.ipv4, sep='')
-        print(header, '\n')
+        print(header)
         if header.payload > 0:
             assert header.data
             self.application.receive(header.data)

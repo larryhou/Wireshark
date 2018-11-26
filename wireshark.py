@@ -552,7 +552,7 @@ class UDPConnectionSession(ConnectionSession):
         self.application:NetworkApplication = None
 
     def accept(self, header:UDPHeader):
-        print(header.ipv4.frame_number, '\n', header.ipv4)
+        print(header.ipv4.frame_number, '\n', header.ipv4, sep='')
         print(header, '\n')
         self.application.receive(header.data)
 

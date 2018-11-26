@@ -171,7 +171,7 @@ class CastAbilityMessage(ActionMessage):
         if self.ability_type == CastType.TARGET:
             self.target = stream.read_sqlit_uint32()  # 1 <= s <= 4
         elif self.ability_type == CastType.DIRECTION:
-            self.target = stream.read_int16()  # 2
+            self.target = stream.read_sint16()  # 2
         elif self.ability_type == CastType.POSITION:
             self.position = (stream.read_uint32(), stream.read_uint32())  # 8
         self.cast_index = stream.read_sqlit_uint32()  # 1 <= s <= 4

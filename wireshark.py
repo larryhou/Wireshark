@@ -168,13 +168,13 @@ class MemoryStream(object):
     def read_ushort(self) -> int:
         return struct.unpack('{}H'.format(self.endian), self.read(2))[0]
 
-    def read_int16(self) -> int:
+    def read_sint16(self) -> int:
         return self.read_short()
 
     def read_uint16(self) -> int:
         return self.read_ushort()
 
-    def read_int32(self) -> int:
+    def read_sint32(self) -> int:
         return struct.unpack('{}i'.format(self.endian), self.read(4))[0]
 
     def read_uint32(self) -> int:
@@ -183,7 +183,7 @@ class MemoryStream(object):
     def read_uint64(self) -> int:
         return struct.unpack('{}Q'.format(self.endian), self.read(8))[0]
 
-    def read_int64(self) -> int:
+    def read_sint64(self) -> int:
         return struct.unpack('{}q'.format(self.endian), self.read(8))[0]
 
     def read_float(self) -> float:

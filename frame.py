@@ -51,7 +51,7 @@ class FrameObject(Debugger):
 
     def decode(self, stream:MemoryStream):
         self.size = stream.position
-        self.frame_index = stream.read_int32()
+        self.frame_index = stream.read_sint32()
         action_count = stream.read_ubyte()
         print('[frame] index:%d action_count:%d'%(self.frame_index, action_count))
         self.action_list = []

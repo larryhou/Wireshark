@@ -70,6 +70,7 @@ class ClientApplication(NetworkApplication):
             self.module_map = ClientApplication.__shared_module_map
         else:
             self.module_map: dict[str, object] = self.__build_module_map()
+            ClientApplication.__shared_module_map = self.module_map
         self.register_command_map()
 
     def register_command_map(self):

@@ -12,7 +12,8 @@ __share_stream__ = MemoryStream()
 class ActionObject(Debugger):
     def __init__(self, debug:bool):
         super(ActionObject, self).__init__(debug)
-        self.size = 0
+        self.length = 0
+        self.header = 3
         self.source_player = 0
         self.data:bytes = None
         self.type:int = 0
@@ -20,22 +21,27 @@ class ActionObject(Debugger):
         self.id:int = 0
 
     def decode(self, stream:MemoryStream):
-        self.size = stream.read_ubyte()
+        self.length = stream.read_ubyte()
         self.source_player = stream.read_ubyte()
         self.type = stream.read_ubyte()
-        self.data = stream.read(self.size - ACTION_HEADER_SIZE)
+        payload = self.length - self.header
+        if payload > 0:
+            self.data = stream.read(payload)
+            assert self.data and len(self.data) == payload
 
         __share_stream__.position = 0
-        __share_stream__.write(self.data)
-        __share_stream__.position = 0
+        if self.data:
+            __share_stream__.write(self.data)
+            __share_stream__.position = 0
+
         self.message = message.get_message(self.type)
         self.message.decode(__share_stream__)
         self.print(self.type, message.MessageType(self.type))
         if self.id !=0:
-            print('[Action] id:%d %s'%(self.id, self.message))
+            print('[Action] {id=%d,size=%d} %s' % (self.id, self.length, self.message))
         else:
             print('   [Action] uin:%d %s'%(self.source_player, self.message))
-        assert __share_stream__.position == len(self.data), 'length:%s expect:%s raw:%s'%(len(self.data), __share_stream__.position, binascii.hexlify(self.data))
+        assert __share_stream__.position == payload, 'length:%s expect:%s raw:%s'%(payload, __share_stream__.position, binascii.hexlify(self.data))
 
     def encode(self, stream:MemoryStream):
         stream.write_ubyte(self.source_player)

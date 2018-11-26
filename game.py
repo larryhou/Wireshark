@@ -72,7 +72,7 @@ class ClientApplication(NetworkApplication):
             self.module_map: dict[str, object] = self.__build_module_map()
             ClientApplication.__shared_module_map = self.module_map
         self.register_command_map()
-        self.header:int = 0
+        self.header:int = self.create_protocol().header
 
     def register_command_map(self):
         pass
@@ -127,8 +127,7 @@ class ClientApplication(NetworkApplication):
         stage = 0
         length = self.stream.length
         protocol: ClientProtocol
-        if self.header == 0:
-            self.header = self.create_protocol().header
+        self.print('offset={} length={} header={}\n'.format(self.stream.position, self.stream.length, self.header))
         while self.stream.position + self.header < length:
             offset = self.stream.position
             char = self.stream.read_ubyte()
@@ -191,6 +190,7 @@ class ArenaApplication(ClientApplication):
     def __init__(self, session: UDPConnectionSession, debug: bool):
         super(ArenaApplication, self).__init__(session, debug)
         self.__shared_stream:MemoryStream = MemoryStream()
+        self.bytes_commands:tuple[int, int] = (0x0306, 0x0307)
 
     def register_command_map(self):
         command_enum = self.module_map.get('GameSvrCmd')
@@ -213,15 +213,23 @@ class ArenaApplication(ClientApplication):
 
     def create_protocol(self): return ArenaProtocol()
 
+    def check_qualified(self, protocol:ClientProtocol):
+        return protocol.cmd in self.bytes_commands or super(ArenaApplication, self).check_qualified(protocol)
+
     def decode_user_action(self, data:bytes):
         stream = self.__shared_stream
         stream.position = 0
         stream.write(data)
-        stream.position = 1
-        action_id = stream.read_ushort()
-        action = frame.ActionObject(self.debug)
-        action.id = action_id
-        action.decode(stream)
+        stream.position = 0
+        num = stream.read_ubyte()
+        for _ in range(num):
+            offset = stream.position
+            length = stream.read_ubyte() + 1
+            action_id = stream.read_ushort()
+            action = frame.ActionObject(self.debug)
+            action.id = action_id
+            action.decode(stream)
+            assert stream.position == offset + length, 'position:{} != offset:{} + length:{}'.format(stream.position, offset, length)
 
     def decode_frame(self, data:bytes):
         stream = self.__shared_stream
@@ -232,12 +240,14 @@ class ArenaApplication(ClientApplication):
         tick.decode(stream)
 
     def decode_bytes(self, data:bytes, protocol:ClientProtocol):
+        print(protocol)
         if protocol.cmd == 0x0306:
             self.decode_user_action(data)
         elif protocol.cmd == 0x0307:
             self.decode_frame(data)
         else:
             super(ArenaApplication, self).decode_bytes(data, protocol)
+        print()
 
 if __name__ == '__main__':
     import argparse

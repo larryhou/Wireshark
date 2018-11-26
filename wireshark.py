@@ -554,7 +554,8 @@ class UDPConnectionSession(ConnectionSession):
     def accept(self, header:UDPHeader):
         print(header.ipv4.frame_number, '\n', header.ipv4, sep='')
         print(header, '\n')
-        if header.data:
+        if header.payload > 0:
+            assert header.data
             self.application.receive(header.data)
 
 class NetworkApplication(Debugger):

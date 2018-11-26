@@ -431,7 +431,7 @@ class UDPHeader(SocketHeader):
         self.payload = self.length - self.header
 
     def __repr__(self):
-        return '[UDP] {} => {} checksum={} length={} header={} payload={}'.format(
+        return '[UDP] {} => {} checksum={:04X} length={} header={} payload={}'.format(
             self.src_port, self.dst_port, self.checksum, self.length, self.header, self.payload
         )
 
@@ -554,7 +554,8 @@ class UDPConnectionSession(ConnectionSession):
     def accept(self, header:UDPHeader):
         print(header.ipv4.frame_number, '\n', header.ipv4, sep='')
         print(header, '\n')
-        self.application.receive(header.data)
+        if header.data:
+            self.application.receive(header.data)
 
 class NetworkApplication(Debugger):
     def __init__(self, session:ConnectionSession, debug:bool):

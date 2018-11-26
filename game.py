@@ -72,6 +72,7 @@ class ClientApplication(NetworkApplication):
             self.module_map: dict[str, object] = self.__build_module_map()
             ClientApplication.__shared_module_map = self.module_map
         self.register_command_map()
+        self.header:int = 0
 
     def register_command_map(self):
         pass
@@ -126,7 +127,9 @@ class ClientApplication(NetworkApplication):
         stage = 0
         length = self.stream.length
         protocol: ClientProtocol
-        while self.stream.position < length:
+        if self.header == 0:
+            self.header = self.create_protocol().header
+        while self.stream.position + self.header < length:
             offset = self.stream.position
             char = self.stream.read_ubyte()
             if stage == 0:

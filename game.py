@@ -225,7 +225,7 @@ class ArenaApplication(ClientApplication):
         stream.position = 0
         stream.write(data)
         stream.position = 0
-        tick = frame.ServerTickObject(self.debug)
+        tick = frame.FrameContainer(self.debug)
         tick.decode(stream)
 
     def decode_bytes(self, data:bytes, protocol:ClientProtocol):

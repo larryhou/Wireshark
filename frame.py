@@ -72,9 +72,9 @@ class FrameObject(Debugger):
             action = self.action_list[n]
             action.encode(stream)
 
-class ServerTickObject(Debugger):
+class FrameContainer(Debugger):
     def __init__(self, debug:bool):
-        super(ServerTickObject, self).__init__(debug)
+        super(FrameContainer, self).__init__(debug)
         self.frame_list:list[FrameObject] = []
 
     def decode(self, stream:MemoryStream):

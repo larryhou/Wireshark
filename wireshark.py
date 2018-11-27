@@ -508,7 +508,6 @@ class TCPConnectionSession(ConnectionSession):
         self.__insert(header, self.session.get(header.src_port))
 
     def forward(self, flushing: bool = False):
-        # return
         src_packages = self.session.get(self.src_port)
         dst_packages = self.session.get(self.dst_port)
         if not src_packages or not dst_packages: return
@@ -570,17 +569,6 @@ class TCPConnectionSession(ConnectionSession):
     def flush(self):
         self.forward(flushing=True)
         self.application.finish()
-        # self.test_package_order()
-
-    def test_package_order(self):
-        for queue in self.session.values():
-            length = len(queue)
-            print([(x.ipv4.frame_number, x.seq - x.seq_offset, x.ack - x.ack_offset) for x in queue])
-            # for n in range(length):
-            #     if n >= 1:
-            #         cur = queue[n]
-            #         ref = queue[n - 1]
-            #         assert cur.seq >= ref.seq and cur.ack >= ref.ack, 'cur={} ref:{}'.format(cur, ref)
 
 class UDPConnectionSession(ConnectionSession):
     def __init__(self, debug: bool = False):

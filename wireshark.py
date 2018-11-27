@@ -327,10 +327,10 @@ class IPv4Header(Codec):
             self.options = stream.read(self.header - 20)
 
     def __repr__(self):
-        return '{} => {} protocol={} checksum={}:{:04X} length={} header={} payload={}'.format(
+        return '{} => {} protocol={} checksum={:04X} length={} header={} payload={}'.format(
             self.format_address(self.src_address),
             self.format_address(self.dst_address),
-            self.protocol, self.checksum, self.checksum, self.length, self.header, self.payload
+            self.protocol, self.checksum, self.length, self.header, self.payload
         )
 
 class SocketHeader(Codec):
@@ -408,7 +408,7 @@ class TCPHeader(SocketHeader):
         flags = []
         for n in range(8):
             if (self.flags >> n & 1) == 1: flags.append(TCPHeader.FLAG_NAMES[n])
-        return '[TCP] {} => {} seq:{} ack:{} <{}> window:{} checksum:{:04X} length:{} header:{} payload:{}'.format(
+        return '[TCP] {} => {} seq={} ack={} <{}> window={} checksum={:04X} length={} header={} payload={}'.format(
             self.src_port, self.dst_port, self.seq - self.seq_offset, self.ack - self.ack_offset, ','.join(flags),
             self.window, self.checksum, self.length, self.header, self.payload)
 
@@ -455,6 +455,9 @@ class ConnectionSession(Debugger):
         self.dst_address = address
         self.dst_port = port
 
+    def flush(self):
+        pass
+
 class TCPConnectionSession(ConnectionSession):
     def __init__(self, debug: bool = False):
         super(TCPConnectionSession, self).__init__(debug=debug)
@@ -464,8 +467,13 @@ class TCPConnectionSession(ConnectionSession):
 
         self.cursor: TCPHeader = None
         self.application: NetworkApplication = None
+        self.counter:int = 0
+
+        self.uniques:list[int] = []
 
     def __insert(self, header: TCPHeader, packages: List[TCPHeader]) -> int:
+        # self.print('! insert => {}={}'.format(header.src_port, len(packages)))
+        if header.payload == 0: return -1
         min_index = 0
         max_index = len(packages) - 1
         if not packages:
@@ -476,7 +484,7 @@ class TCPConnectionSession(ConnectionSession):
             diff = packages[mid].seq - header.seq
             if diff == 0: diff = packages[mid].ack - header.ack
             if diff == 0:
-                if header.payload > 0:
+                if header.payload > packages[mid].payload:
                     self.print('**', packages[mid])
                     packages[mid] = header
                 return mid
@@ -485,9 +493,11 @@ class TCPConnectionSession(ConnectionSession):
             else:
                 min_index = mid + 1
         packages.insert(min_index, header)
+        # self.print('+ insert => {}={}'.format(header.src_port, len(packages)))
         return min_index
 
     def accept(self, header: TCPHeader):
+        self.counter += 1
         if header.src_port not in self.offsets:
             self.offsets[header.src_port] = header.seq
         header.seq_offset = self.offsets.get(header.src_port)
@@ -497,23 +507,27 @@ class TCPConnectionSession(ConnectionSession):
             self.session[header.src_port] = []
         self.__insert(header, self.session.get(header.src_port))
 
-    def advance_forward(self, closed: bool = False):
+    def forward(self, flushing: bool = False):
+        # return
         src_packages = self.session.get(self.src_port)
         dst_packages = self.session.get(self.dst_port)
         if not src_packages or not dst_packages: return
         src, dst = src_packages[0], dst_packages[0]
         self.print('##', src)
         self.print('##', dst)
-        if closed: self.cursor = None
+        if flushing: self.cursor:TCPHeader = None
         pair = [src_packages, dst_packages]
-        if src.ack <= dst.seq:
-            turn = 0
-        elif src.seq >= dst.ack:
-            turn = 1
-        elif src.ack > dst.seq:
-            turn = 1
+        if self.cursor:
+            turn = 0 if self.cursor.src_port == self.src_port else 1
         else:
-            turn = 0
+            if src.ack <= dst.seq:
+                turn = 0
+            elif src.seq >= dst.ack:
+                turn = 1
+            elif src.ack > dst.seq:
+                turn = 1
+            else:
+                turn = 0
         while True:
             ack = 0
             packages = pair[turn]
@@ -524,26 +538,49 @@ class TCPConnectionSession(ConnectionSession):
                 else:
                     continue
             temp_turn = turn
-            self.print('++ turn:{} remain:{}'.format(turn, len(packages)))
-            force_print = closed
+            self.print('++ turn:{} remain:{} {}={}'.format(turn, len(packages), 1 - turn, len(pair[1-turn])))
+            need_print = flushing
+            updated:bool = False
             for n in range(len(packages)):
                 header = packages[n]
-                if self.cursor and header.src_port == self.cursor.src_port: return
-                force_print = force_print or header.flag_syn == 1 or header.flag_fin == 1
-                if (0 < ack != header.ack) or force_print:
-                    if self.cursor and header.ack <= self.cursor.seq: continue
+                need_print = need_print or header.flag_syn == 1 or header.flag_fin == 1 or (self.cursor and self.cursor.ack == header.ack)
+                if (0 < ack != header.ack) or need_print:
                     self.cursor = header
-                    turn = 1 - turn
+                    updated = True
                     n = max(1, n)
                     for i in range(n):
                         header = packages[i]
-                        print(header.ipv4.frame_number, '\n', header.ipv4, sep='')
-                        print(header)
-                        if header.payload > 0: self.application.receive(header.data)
+                        if header.ipv4:
+                            print(header.ipv4.frame_number, '\n', header.ipv4, sep='')
+                            print(header, '\n')
+                        if header.payload > 0:
+                            uuid = hash(header.data)
+                            if uuid not in self.uniques:
+                                self.uniques.append(uuid)
+                                del self.uniques[:-10]
+                                self.application.receive(header.data)
                     del packages[:n]
                     break
                 ack = header.ack
+            if not self.application.decoding and updated:
+                self.cursor = None
+                turn = 1 - turn
             if temp_turn == turn: return
+
+    def flush(self):
+        self.forward(flushing=True)
+        self.application.finish()
+        # self.test_package_order()
+
+    def test_package_order(self):
+        for queue in self.session.values():
+            length = len(queue)
+            print([(x.ipv4.frame_number, x.seq - x.seq_offset, x.ack - x.ack_offset) for x in queue])
+            # for n in range(length):
+            #     if n >= 1:
+            #         cur = queue[n]
+            #         ref = queue[n - 1]
+            #         assert cur.seq >= ref.seq and cur.ack >= ref.ack, 'cur={} ref:{}'.format(cur, ref)
 
 class UDPConnectionSession(ConnectionSession):
     def __init__(self, debug: bool = False):
@@ -558,13 +595,20 @@ class UDPConnectionSession(ConnectionSession):
             assert header.data
             self.application.receive(header.data)
 
+    def flush(self):
+        self.application.finish()
+
 class NetworkApplication(Debugger):
     def __init__(self, session:ConnectionSession, debug:bool):
         super(NetworkApplication, self).__init__(debug)
         self.stream:MemoryStream = MemoryStream()
         self.session:ConnectionSession = session
+        self.decoding:bool = False
 
     def receive(self, data:bytes):
+        pass
+
+    def finish(self):
         pass
 
 class Wireshark(Debugger):
@@ -630,7 +674,7 @@ class Wireshark(Debugger):
             session = self.__tcp_sessions.get(header.socket_uuid)
         session.accept(header)
         if header.ipv4.frame_number % 10 == 0:
-            session.advance_forward()
+            session.forward()
 
     def __decode_udp(self, ipv4: IPv4Header, data: bytes):
         stream = MemoryStream(data=data)
@@ -668,5 +712,7 @@ class Wireshark(Debugger):
             stream.read(24)
             assert check[0] == check[1] == ipv4.length
         for _, session in self.__tcp_sessions.items():  # type: int, TCPConnectionSession
-            session.advance_forward(closed=True)
+            session.flush()
+        for _, session in self.__udp_sessions.items():
+            session.flush()
 

@@ -29,7 +29,7 @@ class ArenaProtocol(ClientProtocol):
         self.cmd = stream.read_uint16()
         self.seq = stream.read_uint16()
         self.ack = stream.read_uint16()
-        self.client_frame = stream.read_uint32()
+        self.client_frame = stream.read_sint32()
 
     def __repr__(self):
         return 'cmd={:04X} seq={} ack={} len={} client_frame={}'.format(self.cmd, self.seq, self.ack, self.len, self.client_frame)
@@ -137,19 +137,20 @@ class ClientApplication(NetworkApplication):
                     if char == 0xAA:
                         protocol = self.create_protocol()
                         protocol.decode(stream=self.stream)
+                        self.print(protocol, 'expect={} receive={}'.format(protocol.len - protocol.header, self.stream.bytes_available))
                         if not self.check_qualified(protocol):
                             self.stream.seek(-1, os.SEEK_CUR)
                             continue
+                        self.decoding = True
                         stage = 1
                         assert protocol.header == self.stream.position - offset
-                        if protocol.len - protocol.header > self.stream.bytes_available: return
+                        if offset + protocol.len > self.stream.length:
+                            self.stream.seek(offset)
+                            return
             if stage == 1:
                 assert protocol
-                if protocol.len == protocol.header:
-                    stage = 0
-                    continue
-                payload = self.stream.read(protocol.len - protocol.header)
                 serializer = self.command_map.get(protocol.cmd)  # type: object
+                payload = self.stream.read(protocol.len - protocol.header) if protocol.len > protocol.header else b''
                 if serializer:
                     message = getattr(serializer, 'FromString')(payload)  # type: object
                     print(message.__class__.__name__, protocol)
@@ -159,6 +160,7 @@ class ClientApplication(NetworkApplication):
                 else:
                     self.decode_bytes(payload, protocol)
                 stage = 0
+                self.decoding = False
 
     def receive(self, data:bytes):
         self.stream.append(data)
@@ -197,14 +199,14 @@ class ApolloHeader(TCPHeader):
         self.ack = stream.read_uint32()
 
     def __repr__(self):
-        return '[LWP] {:5} => {:5} seq={} ack={}'.format(self.src_port, self.dst_port, self.seq, self.ack)
+        return '[LWP] {:5} => {:5} seq={} ack={} length={} payload={}'.format(
+            self.src_port, self.dst_port, (self.seq - self.seq_offset) if self.seq else self.seq, (self.ack - self.ack_offset) if self.ack else self.ack, self.length, self.payload
+        )
 
-class ArenaApplication(ClientApplication):
-    def __init__(self, session: UDPConnectionSession, debug: bool):
-        super(ArenaApplication, self).__init__(session, debug)
+class ArenaTunnelApplication(ClientApplication):
+    def __init__(self, debug: bool):
+        super(ArenaTunnelApplication, self).__init__(None, debug)
         self.__shared_stream:MemoryStream = MemoryStream()
-        self.bytes_commands:tuple[int, int] = (0x0306, 0x0307)
-
 
     def register_command_map(self):
         command_enum = self.module_map.get('GameSvrCmd')
@@ -225,10 +227,25 @@ class ArenaApplication(ClientApplication):
         message_map[0x0308] = self.get_message_class('GameEndPkg')
         message_map[0x0309] = self.get_message_class('GameEndPkg')
 
+    def create_protocol(self):
+        return ArenaProtocol()
+
+    def receive(self, data:bytes):
+        self.print(binascii.hexlify(data))
+        self.stream.append(data)
+        self.decode_protocol()
+
+class ArenaApplication(ClientApplication):
+    def __init__(self, session: UDPConnectionSession, debug: bool):
+        super(ArenaApplication, self).__init__(session, debug)
+        self.__shared_stream:MemoryStream = MemoryStream()
+        self.tunnel:TCPConnectionSession = TCPConnectionSession(debug=self.debug)
+        self.tunnel.application = ArenaTunnelApplication(debug=self.debug)
+
     def create_protocol(self): return ArenaProtocol()
 
     def check_qualified(self, protocol:ClientProtocol):
-        return protocol.cmd in self.bytes_commands or super(ArenaApplication, self).check_qualified(protocol)
+        return True
 
     def decode_user_action(self, data:bytes):
         stream = self.__shared_stream
@@ -273,9 +290,23 @@ class ArenaApplication(ClientApplication):
         apollo.length = len(data)
         apollo.payload = apollo.length - 24
         apollo.data = data[20:-4]
+        # set offsets
+        offsets = self.tunnel.offsets
+        apollo.seq_offset = offsets.get(apollo.src_port) if apollo.src_port in offsets else 0
+        apollo.ack_offset = offsets.get(apollo.dst_port) if apollo.dst_port in offsets else 0
         print(apollo, '\n')
-        if apollo.payload > 0:
+        if not apollo.payload: return
+        if apollo.seq == 0:
             super(ArenaApplication, self).receive(apollo.data)
+        else:
+            if not self.tunnel.src_port:
+                self.tunnel.set_src_client(b'abcd', apollo.src_port)
+                self.tunnel.set_dst_client(b'dcba', apollo.dst_port)
+            self.tunnel.accept(apollo)
+            self.tunnel.forward()
+
+    def finish(self):
+        self.tunnel.flush()
 
 if __name__ == '__main__':
     import argparse

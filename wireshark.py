@@ -609,7 +609,7 @@ class NetworkApplication(Debugger):
         pass
 
 class Wireshark(Debugger):
-    def __init__(self, file_path: str):
+    def __init__(self, file_path: str, linux_ssl:bool = False):
         super(Wireshark, self).__init__(debug=False)
         self.__stream = MemoryStream(file_path=file_path)
         # TCP sessions
@@ -618,7 +618,7 @@ class Wireshark(Debugger):
         # UDP sessions
         self.__udp_sessions:dict[int, UDPConnectionSession] = {}
         self.__udp_application_class:Type[NetworkApplication] = NetworkApplication
-        self.linux_ssl:bool = False
+        self.linux_ssl:bool = linux_ssl
 
     def register_tcp_application(self, tcp_application_class:Type[NetworkApplication]):
         assert issubclass(tcp_application_class, NetworkApplication)

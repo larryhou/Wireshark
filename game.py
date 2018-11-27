@@ -317,10 +317,9 @@ if __name__ == '__main__':
     arguments.add_argument('--linux-ssl', '-s', action='store_true')
     arguments.add_argument('--debug', '-d', action='store_true')
     options = arguments.parse_args(sys.argv[1:])
-    shark = Wireshark(file_path=options.capture_file)
+    shark = Wireshark(file_path=options.capture_file, linux_ssl=options.linux_ssl)
     shark.register_tcp_application(LogicApplication)
     shark.register_udp_application(ArenaApplication)
-    shark.linux_ssl = options.linux_ssl
     shark.debug = options.debug
     shark.locate(address=options.address)
     shark.decode()

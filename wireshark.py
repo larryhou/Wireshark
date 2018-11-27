@@ -282,15 +282,7 @@ class Codec(object):
 
     def encode(self, stream:MemoryStream):
         pass
-
-class LinkHeader(Codec):
-    def __init__(self):
-        super(LinkHeader, self).__init__()
-        self.src_mac_address:bytes = None
-        self.dst_mac_address:bytes = None
-        self.ether_type:int = 0
-
-
+    
 class IPv4Header(Codec):
     def __init__(self, frame_number: int = 0):
         super(IPv4Header, self).__init__()

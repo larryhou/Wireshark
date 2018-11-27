@@ -538,11 +538,10 @@ class TCPConnectionSession(ConnectionSession):
                     continue
             temp_turn = turn
             self.print('++ turn:{} remain:{} {}={}'.format(turn, len(packages), 1 - turn, len(pair[1-turn])))
-            need_print = flushing
             updated:bool = False
             for n in range(len(packages)):
                 header = packages[n]
-                need_print = need_print or header.flag_syn == 1 or header.flag_fin == 1 or (self.cursor and self.cursor.ack == header.ack)
+                need_print = flushing or header.flag_syn == 1 or header.flag_fin == 1 or (self.cursor and self.cursor.ack == header.ack)
                 if (0 < ack != header.ack) or need_print:
                     self.cursor = header
                     updated = True

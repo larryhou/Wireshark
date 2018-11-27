@@ -310,16 +310,17 @@ class ArenaApplication(ClientApplication):
 
 if __name__ == '__main__':
     import argparse
-
     arguments = argparse.ArgumentParser()
     arguments.add_argument('--capture-file', '-cf', required=True, help='raw file captured within Wireshark')
     arguments.add_argument('--proto-path', '-pp', required=True, help='*.proto file path')
     arguments.add_argument('--address', '-a', required=True, help='client/server ip address')
+    arguments.add_argument('--linux-ssl', '-s', action='store_true')
     arguments.add_argument('--debug', '-d', action='store_true')
     options = arguments.parse_args(sys.argv[1:])
     shark = Wireshark(file_path=options.capture_file)
     shark.register_tcp_application(LogicApplication)
     shark.register_udp_application(ArenaApplication)
+    shark.linux_ssl = options.linux_ssl
     shark.debug = options.debug
     shark.locate(address=options.address)
     shark.decode()

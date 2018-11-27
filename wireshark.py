@@ -2,6 +2,8 @@
 import re, os, struct, io, enum, binascii
 from typing import BinaryIO, List, Type
 
+LINUX_SSL_SIZE = 16
+
 class Debugger(object):
     def __init__(self, debug: bool):
         self.debug = debug
@@ -280,6 +282,14 @@ class Codec(object):
 
     def encode(self, stream:MemoryStream):
         pass
+
+class LinkHeader(Codec):
+    def __init__(self):
+        super(LinkHeader, self).__init__()
+        self.src_mac_address:bytes = None
+        self.dst_mac_address:bytes = None
+        self.ether_type:int = 0
+
 
 class IPv4Header(Codec):
     def __init__(self, frame_number: int = 0):
@@ -608,6 +618,7 @@ class Wireshark(Debugger):
         # UDP sessions
         self.__udp_sessions:dict[int, UDPConnectionSession] = {}
         self.__udp_application_class:Type[NetworkApplication] = NetworkApplication
+        self.linux_ssl:bool = False
 
     def register_tcp_application(self, tcp_application_class:Type[NetworkApplication]):
         assert issubclass(tcp_application_class, NetworkApplication)
@@ -633,14 +644,22 @@ class Wireshark(Debugger):
             if offset <= 4:
                 stream.seek(position + 1)
                 continue
-            stream.seek(offset - 4)
-            length = stream.swap_endian(stream.read_uint32())
+            stream.seek(offset)
             header = IPv4Header()
             header.decode(stream)
-            if header.version != 4 or header.src_address != seg or header.length != length:
+            if header.version != 4 or header.src_address != seg:
                 stream.seek(position + 1)
                 continue
-            print('[LOCATE] offset={} {}\n'.format(offset, header))
+            stream.seek(offset)
+            if self.linux_ssl:
+                stream.seek(-LINUX_SSL_SIZE, os.SEEK_CUR)
+            offset = stream.position
+            stream.seek(-8, os.SEEK_CUR)
+            sslen = stream.swap_endian(stream.read_uint32()), stream.swap_endian(stream.read_uint32())
+            if sslen[0] != sslen[1]:
+                stream.seek(position + 1)
+                continue
+            print('[LOCATE] offset={} size:{} {}\n'.format(offset, sslen, header))
             stream.seek(offset)
             return
 
@@ -686,7 +705,10 @@ class Wireshark(Debugger):
         stream.seek(-8, os.SEEK_CUR)
         frame_number = 0
         while stream.position < length:
-            check = stream.swap_endian(stream.read_uint32()), stream.swap_endian(stream.read_uint32())
+            sslen = stream.swap_endian(stream.read_uint32()), stream.swap_endian(stream.read_uint32())
+            assert sslen[0] == sslen[1]
+            position = stream.position + sslen[0]
+            if self.linux_ssl: stream.read(LINUX_SSL_SIZE) # linux cookied capture
             frame_number += 1
             ipv4 = IPv4Header(frame_number)
             ipv4.decode(stream)
@@ -695,9 +717,10 @@ class Wireshark(Debugger):
                 self.__decode_tcp(ipv4, payload)
             elif ipv4.protocol == ProtocolType.UDP.value:
                 self.__decode_udp(ipv4, payload)
+            if position > stream.position: # padding
+                stream.read(position - stream.position)
             stream.align(4)
             stream.read(24)
-            assert check[0] == check[1] == ipv4.length
         for _, session in self.__tcp_sessions.items():  # type: int, TCPConnectionSession
             session.flush()
         for _, session in self.__udp_sessions.items():

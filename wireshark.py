@@ -881,7 +881,7 @@ class Wireshark(Debugger):
             if isinstance(block, IDBHeader):
                 block.finish(stream)
                 print(block)
-                if block.link_type == 12:pass # no link layer
+                if block.link_type == (12, 101):pass # no link layer
                 elif block.link_type == 113:  # linux cookied capture
                     self.linux_sll = True
                 else:raise NotImplementedError('(LINK_TYPE={}) not supported'.format(block.link_type))

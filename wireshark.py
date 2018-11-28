@@ -354,7 +354,9 @@ class BlockHeader(Codec):
         self.length:int = 0
         self.options:list[CaptureOption] = []
         self.offset:int = 0
+        # extend fields
         self.time_scale:float = 0
+        self.timestamp:str = None
 
     def decode(self, stream:MemoryStream):
         self.offset = stream.position - 4
@@ -912,7 +914,7 @@ class Wireshark(Debugger):
                 position = stream.position + block.captured_length
                 if self.linux_sll: stream.read(LINUX_SSL_SIZE)
                 ipv4 = IPv4Header(frame_number)
-                ipv4.timestamp = getattr(block, 'timestamp')
+                ipv4.timestamp = block.timestamp
                 ipv4.decode(stream)
                 payload = stream.read(ipv4.length - ipv4.header)
                 if ipv4.protocol == ProtocolType.TCP.value:

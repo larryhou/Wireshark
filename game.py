@@ -82,10 +82,19 @@ class ClientApplication(NetworkApplication):
         python_out = os.path.abspath('__pb2')
         proto_path = os.path.abspath(options.proto_path)
         assert os.path.exists(proto_path)
+        changed = False
         if not os.path.exists(python_out):
             os.makedirs(python_out)
-        command = 'protoc --proto_path={} --python_out={} {}/*.proto'.format(proto_path, python_out, proto_path)
-        assert os.system(command) == 0
+        else:
+            for proto_name in os.listdir(proto_path):
+                if not proto_name.endswith('.proto'): continue
+                module_name = re.sub(r'\.proto$', '_pb2.py', proto_name)
+                if not os.path.exists(os.path.join(python_out, module_name)):
+                    changed = True
+                    break
+        if changed:
+            command = 'protoc --proto_path={} --python_out={} {}/*.proto'.format(proto_path, python_out, proto_path)
+            assert os.system(command) == 0
         os.system('touch {}/__init__.py'.format(python_out))
         sys.path.append(python_out)
         for file_name in os.listdir(python_out):
@@ -313,13 +322,10 @@ if __name__ == '__main__':
     arguments = argparse.ArgumentParser()
     arguments.add_argument('--capture-file', '-cf', required=True, help='raw file captured within Wireshark')
     arguments.add_argument('--proto-path', '-pp', required=True, help='*.proto file path')
-    arguments.add_argument('--address', '-a', required=True, help='client/server ip address')
-    arguments.add_argument('--linux-ssl', '-s', action='store_true')
     arguments.add_argument('--debug', '-d', action='store_true')
     options = arguments.parse_args(sys.argv[1:])
-    shark = Wireshark(file_path=options.capture_file, linux_ssl=options.linux_ssl)
+    shark = Wireshark(file_path=options.capture_file)
     shark.register_tcp_application(LogicApplication)
     shark.register_udp_application(ArenaApplication)
     shark.debug = options.debug
-    shark.locate(address=options.address)
     shark.decode()

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 import re, os, struct, io, enum, binascii
-from typing import BinaryIO, List, Type
+from typing import BinaryIO, List, Type, Optional
 
 LINUX_SSL_SIZE = 16
 
@@ -282,7 +282,209 @@ class Codec(object):
 
     def encode(self, stream:MemoryStream):
         pass
-    
+
+class OptionCode(enum.Enum):
+    eof = 0
+    comment = 1
+    name = 2
+    description = 3
+    ipv4 = 4
+    ipv6 = 5
+    mac = 6
+    eui = 7
+    speed = 8
+    tsresol = 9
+    tszone = 10
+    filter = 11
+    os = 12
+    fcslen = 13
+    tsoffset = 14
+
+class CaptureOption(Codec):
+    def __init__(self):
+        super(CaptureOption, self).__init__()
+        self.code:OptionCode = OptionCode.eof
+        self.length:int = 0
+        self.data:any = None
+
+    def decode(self, stream:MemoryStream):
+        self.code = OptionCode(stream.read_uint16())
+        self.length = stream.read_uint16()
+        offset = stream.position
+        if self.code == OptionCode.eof:
+            assert self.length == 0
+        elif self.code in (OptionCode.comment, OptionCode.name, OptionCode.description, OptionCode.filter, OptionCode.os):
+            self.data = stream.read_string(self.length)
+        elif self.code == OptionCode.ipv4:
+            if self.length > 8:
+                self.data = stream.read_string(self.length)
+            else:
+                self.data = stream.read_hex(8)  #  8[ip] + 8[mask]
+        elif self.code == OptionCode.ipv6:
+            self.data = stream.read_hex(17) # 16[ip] + 1[prefix]
+        elif self.code == OptionCode.mac:
+            self.data = stream.read_hex(6)
+        elif self.code == OptionCode.eui:
+            self.data = stream.read_hex(8)
+        elif self.code == OptionCode.speed:
+            self.data = stream.read_uint64()
+        elif self.code == OptionCode.tsresol:
+            self.data = stream.read_boolean()
+        elif self.code == OptionCode.tszone:
+            self.data = stream.read_sint32()
+        elif self.code == OptionCode.fcslen:
+            self.data = stream.read_ubyte()
+        elif self.code == OptionCode.tsoffset:
+            self.data = stream.read_sint64()
+        else:
+            self.data = stream.read_hex(self.length)
+        assert stream.position == offset + self.length, 'position[{}] != offset[{}] + length[{}]'.format(stream.position, offset, self.length)
+        stream.align(4)
+
+    def __repr__(self):
+        if self.data is not None:
+            return '[Option] code={} length={} data={!r}'.format(self.code.name, self.length, self.data)
+        else:
+            return '[Option] code={}'.format(self.code.name)
+
+class BlockHeader(Codec):
+    def __init__(self):
+        super(BlockHeader, self).__init__()
+        self.type:int = 0
+        self.length:int = 0
+        self.options:list[CaptureOption] = []
+        self.offset:int = 0
+
+    def decode(self, stream:MemoryStream):
+        self.offset = stream.position - 4
+        self.length = stream.read_uint32()
+
+    def finish(self, stream:MemoryStream):
+        self.options = []
+        while stream.position + 4 < self.length + self.offset:
+            option = CaptureOption()
+            option.decode(stream)
+            self.options.append(option)
+            continue
+        length = stream.read_uint32()
+        assert length == self.length, 'position={} expect={} but={}'.format(stream.position, self.length, length)
+
+    def format(self, extra:str, prefix:str = ''):
+        bf = io.StringIO()
+        if prefix: bf.write(prefix + ' ')
+        bf.write('type=0x{:08X} length={}'.format(self.type, self.length))
+        if extra: bf.write(' ' + extra)
+        bf.write('\n')
+        for option in self.options:
+            bf.write('  {}\n'.format(option))
+        bf.seek(0)
+        return bf.read()
+
+    def __repr__(self):
+        return self.format(extra='')
+
+class IDBHeader(BlockHeader):
+    def __init__(self):
+        super(IDBHeader, self).__init__()
+        self.link_type:int = 0
+        self.snap_length:int = 0
+
+    def decode(self, stream:MemoryStream):
+        super(IDBHeader, self).decode(stream)
+        assert self.type == 0x01
+        self.link_type = stream.read_uint16()
+        stream.read_uint16()
+        self.snap_length = stream.read_sint32()
+
+    def __repr__(self):
+        return self.format('link_type={} snap_length={:08X}'.format(self.link_type, self.snap_length), prefix='[IDB]')
+
+class SHBHeader(BlockHeader):
+    def __init__(self):
+        super(SHBHeader, self).__init__()
+        self.order_magic:int = 0
+        self.major_version:int = 0
+        self.minor_version:int = 0
+        self.section_length:int = 0
+
+    @property
+    def endian(self):
+        if self.order_magic == 0x4D3C2B1A: return '>'
+        if self.order_magic == 0x1A2B3C4D: return '<'
+        return None
+
+    def decode(self, stream:MemoryStream):
+        super(SHBHeader, self).decode(stream)
+        assert self.type == 0x0A0D0D0A
+        self.order_magic = stream.read_uint32()
+        self.major_version = stream.read_uint16()
+        self.minor_version = stream.read_uint16()
+        self.section_length = stream.read_uint64()
+
+    def __repr__(self):
+        return self.format('order_magic={:08X} major_version={} minor_version={} section_length={:016X}'.format(
+            self.order_magic, self.major_version, self.minor_version, self.section_length
+        ), prefix='[SHB]')
+
+class ISBHeader(BlockHeader):
+    def __init__(self):
+        super(ISBHeader, self).__init__()
+        self.interface:int = 0
+        self.timestamp:int = 0
+
+    def decode(self, stream:MemoryStream):
+        super(ISBHeader, self).decode(stream)
+        assert self.type == 0x05
+        self.interface = stream.read_uint32()
+        self.timestamp = stream.read_uint64()
+
+    def __repr__(self):
+        return self.format('interface={} timestamp={}'.format(self.interface, self.timestamp), prefix='[ISB]')
+
+class EPBHeader(BlockHeader):
+    def __init__(self):
+        super(EPBHeader, self).__init__()
+        self.interface:int = 0
+        self.timestamp:int = 0
+        self.captured_length:int = 0
+        self.original_length:int = 0
+
+    def decode(self, stream:MemoryStream):
+        super(EPBHeader, self).decode(stream)
+        assert self.type == 0x06
+        self.interface = stream.read_uint32()
+        self.timestamp = stream.read_uint64()
+        self.captured_length = stream.read_uint32()
+        self.original_length = stream.read_uint32()
+
+    def __repr__(self):
+        return self.format('interface={} timestamp={} captured_length={} original_length={}'.format(
+            self.interface, self.timestamp, self.captured_length, self.original_length
+        ), prefix='[EPB]')
+
+class SPBHeader(BlockHeader):
+    def __init__(self):
+        super(SPBHeader, self).__init__()
+        self.captured_length:int = 0
+
+    def decode(self, stream:MemoryStream):
+        super(SPBHeader, self).decode(stream)
+        assert self.type == 0x03
+        self.captured_length = stream.read_uint32()
+
+    def __repr__(self):
+        return self.format('captured_length={}'.format(self.captured_length), prefix='[SPB]')
+
+class BlockHeaderFactory(object):
+    @classmethod
+    def get(cls, block_type:int)->Optional[BlockHeader]:
+        if block_type == 0x06: return EPBHeader()
+        if block_type == 0x03: return SPBHeader()
+        if block_type == 0x05: return ISBHeader()
+        if block_type == 0x01: return IDBHeader()
+        if block_type == 0x0A0D0D0A: return SHBHeader()
+        return None
+
 class IPv4Header(Codec):
     def __init__(self, frame_number: int = 0):
         super(IPv4Header, self).__init__()
@@ -601,7 +803,7 @@ class NetworkApplication(Debugger):
         pass
 
 class Wireshark(Debugger):
-    def __init__(self, file_path: str, linux_ssl:bool = False):
+    def __init__(self, file_path: str, linux_sll:bool = False):
         super(Wireshark, self).__init__(debug=False)
         self.__stream = MemoryStream(file_path=file_path)
         # TCP sessions
@@ -610,7 +812,7 @@ class Wireshark(Debugger):
         # UDP sessions
         self.__udp_sessions:dict[int, UDPConnectionSession] = {}
         self.__udp_application_class:Type[NetworkApplication] = NetworkApplication
-        self.linux_ssl:bool = linux_ssl
+        self.linux_sll:bool = linux_sll
 
     def register_tcp_application(self, tcp_application_class:Type[NetworkApplication]):
         assert issubclass(tcp_application_class, NetworkApplication)
@@ -619,41 +821,6 @@ class Wireshark(Debugger):
     def register_udp_application(self, udp_application_class:Type[NetworkApplication]):
         assert issubclass(udp_application_class, NetworkApplication)
         self.__udp_application_class = udp_application_class
-
-    def locate(self, address: str):
-        seg = bytes([int(x, 10) for x in re.split(r'\s*[:.]\s*', address)])
-        assert len(seg) == 4
-        stream = self.__stream
-        stream.seek(0)
-        while True:
-            position = stream.position
-            for n in range(4):
-                char = stream.read_ubyte()
-                if char != seg[n]:
-                    stream.seek(position + 1)
-                    continue
-            offset = position - 16
-            if offset <= 4:
-                stream.seek(position + 1)
-                continue
-            stream.seek(offset)
-            header = IPv4Header()
-            header.decode(stream)
-            if header.version != 4 or header.src_address != seg:
-                stream.seek(position + 1)
-                continue
-            stream.seek(offset)
-            if self.linux_ssl:
-                stream.seek(-LINUX_SSL_SIZE, os.SEEK_CUR)
-            offset = stream.position
-            stream.seek(-8, os.SEEK_CUR)
-            sslen = stream.swap_endian(stream.read_uint32()), stream.swap_endian(stream.read_uint32())
-            if sslen[0] != sslen[1]:
-                stream.seek(position + 1)
-                continue
-            print('[LOCATE] offset={} size:{} {}\n'.format(offset, sslen, header))
-            stream.seek(offset)
-            return
 
     def __decode_tcp(self, ipv4: IPv4Header, data: bytes):
         stream = MemoryStream(data=data)
@@ -693,28 +860,53 @@ class Wireshark(Debugger):
 
     def decode(self):
         stream = self.__stream
-        length = stream.length
-        stream.seek(-8, os.SEEK_CUR)
+        stream.seek(0)
+        total = stream.length
         frame_number = 0
-        while stream.position < length:
-            sslen = stream.swap_endian(stream.read_uint32()), stream.swap_endian(stream.read_uint32())
-            assert sslen[0] == sslen[1]
-            position = stream.position + sslen[0]
-            if self.linux_ssl: stream.read(LINUX_SSL_SIZE) # linux cookied capture
-            frame_number += 1
-            ipv4 = IPv4Header(frame_number)
-            ipv4.decode(stream)
-            payload = stream.read(ipv4.length - ipv4.header)
-            if ipv4.protocol == ProtocolType.TCP.value:
-                self.__decode_tcp(ipv4, payload)
-            elif ipv4.protocol == ProtocolType.UDP.value:
-                self.__decode_udp(ipv4, payload)
-            if position > stream.position: # padding
-                stream.read(position - stream.position)
-            stream.align(4)
-            stream.read(24)
+        stream.endian = '<'
+        while stream.position < total:
+            offset = stream.position
+            block_type = stream.read_uint32()
+            block = BlockHeaderFactory.get(block_type)
+            if not block:
+                block = BlockHeader()
+                stream.read(block.length - 8)
+                continue
+            block.type = block_type
+            block.decode(stream)
+            if isinstance(block, SHBHeader):
+                block.finish(stream)
+                print(block)
+                continue
+            if isinstance(block, IDBHeader):
+                block.finish(stream)
+                print(block)
+                if block.link_type == 12:pass # no link layer
+                elif block.link_type == 113:  # linux cookied capture
+                    self.linux_sll = True
+                else:raise NotImplementedError('(LINK_TYPE={}) not supported'.format(block.link_type))
+                continue
+            print(block)
+            if isinstance(block, EPBHeader) or isinstance(block, SPBHeader):
+                frame_number += 1
+                stream.endian = '>'
+                position = stream.position + block.captured_length
+                if self.linux_sll: stream.read(LINUX_SSL_SIZE)
+                ipv4 = IPv4Header(frame_number)
+                ipv4.decode(stream)
+                payload = stream.read(ipv4.length - ipv4.header)
+                if ipv4.protocol == ProtocolType.TCP.value:
+                    self.__decode_tcp(ipv4, payload)
+                elif ipv4.protocol == ProtocolType.UDP.value:
+                    self.__decode_udp(ipv4, payload)
+                stream.align(4)
+                if position > stream.position:  # padding
+                    stream.read(position - stream.position)
+                    stream.align(4)
+            stream.endian = '<'
+            block.finish(stream)
+            assert offset + block.length == stream.position
         for _, session in self.__tcp_sessions.items():  # type: int, TCPConnectionSession
             session.flush()
         for _, session in self.__udp_sessions.items():
             session.flush()
-

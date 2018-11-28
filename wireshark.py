@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-import re, os, struct, io, enum, binascii
+import re, os, struct, io, enum, binascii, time
 from typing import BinaryIO, List, Type, Optional
 
 LINUX_SSL_SIZE = 16
@@ -329,7 +329,7 @@ class CaptureOption(Codec):
         elif self.code == OptionCode.speed:
             self.data = stream.read_uint64()
         elif self.code == OptionCode.tsresol:
-            self.data = stream.read_boolean()
+            self.data = stream.read_ubyte()
         elif self.code == OptionCode.tszone:
             self.data = stream.read_sint32()
         elif self.code == OptionCode.fcslen:
@@ -354,10 +354,17 @@ class BlockHeader(Codec):
         self.length:int = 0
         self.options:list[CaptureOption] = []
         self.offset:int = 0
+        self.time_scale:float = 0
 
     def decode(self, stream:MemoryStream):
         self.offset = stream.position - 4
         self.length = stream.read_uint32()
+
+    def read_timestamp(self, stream:MemoryStream)->str:
+        utc = stream.read_uint32() * ((1 << 32) * self.time_scale) + stream.read_uint32() * self.time_scale
+        date = time.localtime(int(utc))
+        fraction = '{:.6f}'.format(utc % 1)
+        return time.strftime('%Y-%m-%dT%H:%M:%S', date) + fraction[1:]
 
     def finish(self, stream:MemoryStream):
         self.options = []
@@ -436,7 +443,7 @@ class ISBHeader(BlockHeader):
         super(ISBHeader, self).decode(stream)
         assert self.type == 0x05
         self.interface = stream.read_uint32()
-        self.timestamp = stream.read_uint64()
+        self.timestamp = self.read_timestamp(stream)
 
     def __repr__(self):
         return self.format('interface={} timestamp={}'.format(self.interface, self.timestamp), prefix='[ISB]')
@@ -453,7 +460,8 @@ class EPBHeader(BlockHeader):
         super(EPBHeader, self).decode(stream)
         assert self.type == 0x06
         self.interface = stream.read_uint32()
-        self.timestamp = stream.read_uint64()
+        self.timestamp = self.read_timestamp(stream)
+
         self.captured_length = stream.read_uint32()
         self.original_length = stream.read_uint32()
 
@@ -504,6 +512,7 @@ class IPv4Header(Codec):
         self.dst_address: bytes = None
         self.options: bytes = None
         self.frame_number: int = frame_number
+        self.timestamp:str = None
 
     @staticmethod
     def format_address(address: bytes) -> str:
@@ -753,7 +762,7 @@ class TCPConnectionSession(ConnectionSession):
                     for i in range(n):
                         header = packages[i]
                         if header.ipv4:
-                            print(header.ipv4.frame_number, '\n', header.ipv4, sep='')
+                            print(header.ipv4.frame_number, ' ', header.ipv4.timestamp, '\n', header.ipv4, sep='')
                             print(header, '\n')
                         if header.payload > 0:
                             uuid = hash(header.data)
@@ -780,7 +789,7 @@ class UDPConnectionSession(ConnectionSession):
         self.application:NetworkApplication = None
 
     def accept(self, header:UDPHeader):
-        print(header.ipv4.frame_number, '\n', header.ipv4, sep='')
+        print(header.ipv4.frame_number, ' ', header.ipv4.timestamp, '\n', header.ipv4, sep='')
         print(header)
         if header.payload > 0:
             assert header.data
@@ -813,6 +822,7 @@ class Wireshark(Debugger):
         self.__udp_sessions:dict[int, UDPConnectionSession] = {}
         self.__udp_application_class:Type[NetworkApplication] = NetworkApplication
         self.linux_sll:bool = linux_sll
+        self.time_scale:float = 1
 
     def register_tcp_application(self, tcp_application_class:Type[NetworkApplication]):
         assert issubclass(tcp_application_class, NetworkApplication)
@@ -873,6 +883,7 @@ class Wireshark(Debugger):
                 stream.read(block.length - 8)
                 continue
             block.type = block_type
+            block.time_scale = self.time_scale
             block.decode(stream)
             if isinstance(block, SHBHeader):
                 block.finish(stream)
@@ -881,18 +892,27 @@ class Wireshark(Debugger):
             if isinstance(block, IDBHeader):
                 block.finish(stream)
                 print(block)
-                if block.link_type == (12, 101):pass # no link layer
+                for option in block.options:
+                    if option.code == OptionCode.tsresol:
+                        tsresol:int = option.data
+                        if (tsresol & 0x80) == 1:
+                            time_scale = 1 / (1 << (tsresol & 0x7F))
+                        else:
+                            time_scale = 10**(-tsresol)
+                        self.time_scale = time_scale
+                if block.link_type in (12, 101):pass # no link layer
                 elif block.link_type == 113:  # linux cookied capture
                     self.linux_sll = True
                 else:raise NotImplementedError('(LINK_TYPE={}) not supported'.format(block.link_type))
                 continue
-            print(block)
+            self.print(block)
             if isinstance(block, EPBHeader) or isinstance(block, SPBHeader):
                 frame_number += 1
                 stream.endian = '>'
                 position = stream.position + block.captured_length
                 if self.linux_sll: stream.read(LINUX_SSL_SIZE)
                 ipv4 = IPv4Header(frame_number)
+                ipv4.timestamp = getattr(block, 'timestamp')
                 ipv4.decode(stream)
                 payload = stream.read(ipv4.length - ipv4.header)
                 if ipv4.protocol == ProtocolType.TCP.value:

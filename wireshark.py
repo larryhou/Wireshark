@@ -824,7 +824,7 @@ class Wireshark(Debugger):
         self.__udp_sessions:dict[int, UDPConnectionSession] = {}
         self.__udp_application_class:Type[NetworkApplication] = NetworkApplication
         self.linux_sll:bool = linux_sll
-        self.time_scale:float = 1
+        self.time_scale:float = 1e-6
 
     def register_tcp_application(self, tcp_application_class:Type[NetworkApplication]):
         assert issubclass(tcp_application_class, NetworkApplication)

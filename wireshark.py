@@ -932,7 +932,7 @@ class Wireshark(Debugger):
                     stream.seek(position)
                 stream.align(4)
                 if position > stream.position:  # padding
-                    stream.read(position - stream.position)
+                    stream.seek(position)
                     stream.align(4)
             stream.endian = '<'
             block.finish(stream)

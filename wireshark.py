@@ -314,18 +314,22 @@ class CaptureOption(Codec):
         if self.code == OptionCode.eof:
             assert self.length == 0
         elif self.code in (OptionCode.comment, OptionCode.name, OptionCode.description, OptionCode.filter, OptionCode.os):
-            self.data = stream.read_string(self.length)
+            data = stream.read(self.length)
+            try:
+                self.data = data.decode('utf-8')
+            except:
+                self.data = binascii.hexlify(data).decode('ascii')
         elif self.code == OptionCode.ipv4:
             if self.length > 8:
                 self.data = stream.read_string(self.length)
             else:
-                self.data = stream.read_hex(8)  #  8[ip] + 8[mask]
+                self.data = stream.read_hex(self.length)  #  8[ip] + 8[mask]
         elif self.code == OptionCode.ipv6:
-            self.data = stream.read_hex(17) # 16[ip] + 1[prefix]
+            self.data = stream.read_hex(self.length) # 16[ip] + 1[prefix]
         elif self.code == OptionCode.mac:
-            self.data = stream.read_hex(6)
+            self.data = stream.read_hex(self.length)
         elif self.code == OptionCode.eui:
-            self.data = stream.read_hex(8)
+            self.data = stream.read_hex(self.length)
         elif self.code == OptionCode.speed:
             self.data = stream.read_uint64()
         elif self.code == OptionCode.tsresol:
@@ -913,14 +917,19 @@ class Wireshark(Debugger):
                 stream.endian = '>'
                 position = stream.position + block.captured_length
                 if self.linux_sll: stream.read(LINUX_SSL_SIZE)
-                ipv4 = IPv4Header(frame_number)
-                ipv4.timestamp = block.timestamp
-                ipv4.decode(stream)
-                payload = stream.read(ipv4.length - ipv4.header)
-                if ipv4.protocol == ProtocolType.TCP.value:
-                    self.__decode_tcp(ipv4, payload)
-                elif ipv4.protocol == ProtocolType.UDP.value:
-                    self.__decode_udp(ipv4, payload)
+                version = stream.read_ubyte() >> 4 & 0xF
+                stream.seek(-1, os.SEEK_CUR)
+                if version == 4:
+                    ipv4 = IPv4Header(frame_number)
+                    ipv4.timestamp = block.timestamp
+                    ipv4.decode(stream)
+                    payload = stream.read(ipv4.length - ipv4.header)
+                    if ipv4.protocol == ProtocolType.TCP.value:
+                        self.__decode_tcp(ipv4, payload)
+                    elif ipv4.protocol == ProtocolType.UDP.value:
+                        self.__decode_udp(ipv4, payload)
+                else:
+                    stream.seek(position)
                 stream.align(4)
                 if position > stream.position:  # padding
                     stream.read(position - stream.position)

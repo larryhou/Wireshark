@@ -919,7 +919,7 @@ class Wireshark(Debugger):
                 if self.linux_sll: stream.read(LINUX_SSL_SIZE)
                 version = stream.read_ubyte() >> 4 & 0xF
                 stream.seek(-1, os.SEEK_CUR)
-                if version == 4:
+                if version == 4: # Only available for IPv4
                     ipv4 = IPv4Header(frame_number)
                     ipv4.timestamp = block.timestamp
                     ipv4.decode(stream)

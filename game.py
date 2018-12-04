@@ -304,7 +304,7 @@ class ArenaApplication(ClientApplication):
         apollo.seq_offset = offsets.get(apollo.src_port) if apollo.src_port in offsets else 0
         apollo.ack_offset = offsets.get(apollo.dst_port) if apollo.dst_port in offsets else 0
         print(apollo, '\n')
-        if not apollo.payload: return
+
         if apollo.seq == 0:
             super(ArenaApplication, self).receive(apollo.data)
         else:

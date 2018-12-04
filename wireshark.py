@@ -717,35 +717,45 @@ class TCPConnectionSession(ConnectionSession):
 
     def accept(self, header: TCPHeader):
         self.counter += 1
-        if header.src_port not in self.offsets:
+        if header.src_port not in self.offsets and header.seq != 0:
             self.offsets[header.src_port] = header.seq
+        if header.dst_port not in self.offsets and header.ack != 0:
+            self.offsets[header.dst_port] = header.ack
         header.seq_offset = self.offsets.get(header.src_port)
         header.ack_offset = self.offsets.get(header.dst_port) if header.dst_port in self.offsets else 0
         self.print('>>', header)
         if header.src_port not in self.session:
             self.session[header.src_port] = []
+            self.session[header.dst_port] = []
         self.__insert(header, self.session.get(header.src_port))
 
     def forward(self, flushing: bool = False):
         src_packages = self.session.get(self.src_port)
         dst_packages = self.session.get(self.dst_port)
-        if not src_packages or not dst_packages: return
-        src, dst = src_packages[0], dst_packages[0]
-        self.print('##', src)
-        self.print('##', dst)
-        if flushing: self.cursor:TCPHeader = None
         pair = [src_packages, dst_packages]
-        if self.cursor:
-            turn = 0 if self.cursor.src_port == self.src_port else 1
+        if not src_packages and not dst_packages: return
+        if not src_packages:
+            turn = 1
+            self.cursor = None
+        elif not dst_packages:
+            turn = 0
+            self.cursor = None
         else:
-            if src.ack <= dst.seq:
-                turn = 0
-            elif src.seq >= dst.ack:
-                turn = 1
-            elif src.ack > dst.seq:
-                turn = 1
+            src, dst = src_packages[0], dst_packages[0]
+            self.print('##', src)
+            self.print('##', dst)
+            if flushing: self.cursor:TCPHeader = None
+            if self.cursor:
+                turn = 0 if self.cursor.src_port == self.src_port else 1
             else:
-                turn = 0
+                if src.ack <= dst.seq:
+                    turn = 0
+                elif src.seq >= dst.ack:
+                    turn = 1
+                elif src.ack > dst.seq:
+                    turn = 1
+                else:
+                    turn = 0
         while True:
             ack = 0
             packages = pair[turn]
@@ -761,6 +771,7 @@ class TCPConnectionSession(ConnectionSession):
             for n in range(len(packages)):
                 header = packages[n]
                 need_print = flushing or header.flag_syn == 1 or header.flag_fin == 1 or (self.cursor and self.cursor.ack == header.ack)
+                # self.print('need_print={} ack={} header.ack={}'.format(need_print, ack, header.ack))
                 if (0 < ack != header.ack) or need_print:
                     self.cursor = header
                     updated = True

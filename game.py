@@ -321,7 +321,7 @@ if __name__ == '__main__':
     import argparse
     arguments = argparse.ArgumentParser()
     arguments.add_argument('--capture-file', '-f', required=True, help='raw file captured within Wireshark')
-    arguments.add_argument('--proto-path', '-p', required=True, help='*.proto file path')
+    arguments.add_argument('--proto-path', '-p', default='__proto', help='*.proto file path')
     arguments.add_argument('--debug', '-d', action='store_true')
     options = arguments.parse_args(sys.argv[1:])
     shark = Wireshark(file_path=options.capture_file)

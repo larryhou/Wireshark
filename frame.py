@@ -41,7 +41,7 @@ class ActionObject(Debugger):
             print('[Action] {id=%d,size=%d} %s' % (self.id, self.length, self.message))
         else:
             print('   [Action] uin:%d %s'%(self.source_player, self.message))
-        assert __share_stream__.position == payload, 'length:%s expect:%s raw:%s'%(payload, __share_stream__.position, binascii.hexlify(self.data))
+        # assert __share_stream__.position == payload, 'length:%s expect:%s raw:%s'%(payload, __share_stream__.position, binascii.hexlify(self.data))
 
     def encode(self, stream:MemoryStream):
         stream.write_ubyte(self.source_player)

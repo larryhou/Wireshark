@@ -840,6 +840,7 @@ class Wireshark(Debugger):
         self.__udp_application_class:Type[NetworkApplication] = NetworkApplication
         self.linux_sll:bool = linux_sll
         self.time_scale:float = 1e-6
+        self.link_type:int = 1
 
     def register_tcp_application(self, tcp_application_class:Type[NetworkApplication]):
         assert issubclass(tcp_application_class, NetworkApplication)
@@ -917,17 +918,19 @@ class Wireshark(Debugger):
                         else:
                             time_scale = 10**(-tsresol)
                         self.time_scale = time_scale
-                if block.link_type in (12, 101):pass # no link layer
-                elif block.link_type == 113:  # linux cookied capture
-                    self.linux_sll = True
-                else:raise NotImplementedError('(LINK_TYPE={}) not supported'.format(block.link_type))
+                self.link_type = block.link_type
                 continue
             self.print(block)
             if isinstance(block, EPBHeader) or isinstance(block, SPBHeader):
                 frame_number += 1
                 stream.endian = '>'
                 position = stream.position + block.captured_length
-                if self.linux_sll: stream.read(LINUX_SSL_SIZE)
+                if self.link_type == 1:
+                    stream.seek(14, os.SEEK_CUR)
+                elif self.link_type in (12, 101):pass # no link layer
+                elif self.link_type == 113:  # linux cookied capture
+                    stream.seek(16, os.SEEK_CUR)
+                else:raise NotImplementedError('(LINK_TYPE={}) not supported'.format(self.link_type))
                 version = stream.read_ubyte() >> 4 & 0xF
                 stream.seek(-1, os.SEEK_CUR)
                 if version == 4: # Only available for IPv4

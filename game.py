@@ -135,7 +135,7 @@ class ClientApplication(NetworkApplication):
     def decode_protocol(self):
         stage = 0
         length = self.stream.length
-        protocol: ClientProtocol
+        protocol: ClientProtocol = None
         self.print('offset={} length={} header={}\n'.format(self.stream.position, self.stream.length, self.header))
         while self.stream.position + self.header < length:
             offset = self.stream.position

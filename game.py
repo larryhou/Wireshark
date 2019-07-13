@@ -85,13 +85,12 @@ class ClientApplication(NetworkApplication):
         changed = False
         if not os.path.exists(python_out):
             os.makedirs(python_out)
-        else:
-            for proto_name in os.listdir(proto_path):
-                if not proto_name.endswith('.proto'): continue
-                module_name = re.sub(r'\.proto$', '_pb2.py', proto_name)
-                if not os.path.exists(os.path.join(python_out, module_name)):
-                    changed = True
-                    break
+        for proto_name in os.listdir(proto_path):
+            if not proto_name.endswith('.proto'): continue
+            module_name = re.sub(r'\.proto$', '_pb2.py', proto_name)
+            if not os.path.exists(os.path.join(python_out, module_name)):
+                changed = True
+                break
         if changed:
             command = 'protoc --proto_path={} --python_out={} {}/*.proto'.format(proto_path, python_out, proto_path)
             assert os.system(command) == 0

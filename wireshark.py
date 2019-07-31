@@ -681,42 +681,14 @@ class TCPConnectionSession(ConnectionSession):
     def __init__(self, debug: bool = False):
         super(TCPConnectionSession, self).__init__(debug=debug)
 
-        self.session: dict[int, list[TCPHeader]] = {}
+        self.sessions: dict[int, list[TCPHeader]] = {}
         self.offsets: dict[int, int] = {}
 
         self.cursor: TCPHeader = None
         self.application: NetworkApplication = None
-        self.counter:int = 0
-
-        self.uniques:list[int] = []
-
-    def __insert(self, header: TCPHeader, packages: List[TCPHeader]) -> int:
-        # self.print('! insert => {}={}'.format(header.src_port, len(packages)))
-        if header.payload == 0: return -1
-        min_index = 0
-        max_index = len(packages) - 1
-        if not packages:
-            packages.append(header)
-            return 0
-        while min_index <= max_index:
-            mid = (min_index + max_index) // 2
-            diff = packages[mid].seq - header.seq
-            if diff == 0: diff = packages[mid].ack - header.ack
-            if diff == 0:
-                if header.payload > packages[mid].payload:
-                    self.print('**', packages[mid])
-                    packages[mid] = header
-                return mid
-            if diff > 0:
-                max_index = mid - 1
-            else:
-                min_index = mid + 1
-        packages.insert(min_index, header)
-        # self.print('+ insert => {}={}'.format(header.src_port, len(packages)))
-        return min_index
+        self.visit: dict[int, bool] = {}
 
     def accept(self, header: TCPHeader):
-        self.counter += 1
         if header.src_port not in self.offsets and header.seq != 0:
             self.offsets[header.src_port] = header.seq
         if header.dst_port not in self.offsets and header.ack != 0:
@@ -724,14 +696,17 @@ class TCPConnectionSession(ConnectionSession):
         header.seq_offset = self.offsets.get(header.src_port)
         header.ack_offset = self.offsets.get(header.dst_port) if header.dst_port in self.offsets else 0
         self.print('>>', header)
-        if header.src_port not in self.session:
-            self.session[header.src_port] = []
-            self.session[header.dst_port] = []
-        self.__insert(header, self.session.get(header.src_port))
+        if header.src_port not in self.sessions:
+            self.sessions[header.src_port] = []
+            self.sessions[header.dst_port] = []
+        uuid = (header.seq << 31 | header.ack) << 2 | header.src_port
+        if uuid in self.visit or header.payload == 0: return
+        self.visit[uuid] = True
+        self.sessions[header.src_port].append(header)
 
-    def forward(self, flushing: bool = False):
-        src_packages = self.session.get(self.src_port)
-        dst_packages = self.session.get(self.dst_port)
+    def broadcast(self, flushing: bool = False):
+        src_packages = self.sessions.get(self.src_port)
+        dst_packages = self.sessions.get(self.dst_port)
         pair = [src_packages, dst_packages]
         if not src_packages and not dst_packages: return
         if not src_packages:
@@ -742,20 +717,13 @@ class TCPConnectionSession(ConnectionSession):
             self.cursor = None
         else:
             src, dst = src_packages[0], dst_packages[0]
-            self.print('##', src)
-            self.print('##', dst)
+            self.print('## →', src)
+            self.print('## ←', dst)
             if flushing: self.cursor:TCPHeader = None
             if self.cursor:
                 turn = 0 if self.cursor.src_port == self.src_port else 1
             else:
-                if src.ack <= dst.seq:
-                    turn = 0
-                elif src.seq >= dst.ack:
-                    turn = 1
-                elif src.ack > dst.seq:
-                    turn = 1
-                else:
-                    turn = 0
+                turn = 0 if src.ack <= dst.seq else 1
         while True:
             ack = 0
             packages = pair[turn]
@@ -781,12 +749,7 @@ class TCPConnectionSession(ConnectionSession):
                         if header.ipv4:
                             print(header.ipv4.frame_number, ' ', header.ipv4.timestamp, '\n', header.ipv4, sep='')
                             print(header, '\n')
-                        if header.payload > 0:
-                            uuid = hash(header.data)
-                            if uuid not in self.uniques:
-                                self.uniques.append(uuid)
-                                del self.uniques[:-10]
-                                self.application.receive(header.data)
+                        self.application.receive(header.data)
                     del packages[:n]
                     break
                 ack = header.ack
@@ -796,7 +759,7 @@ class TCPConnectionSession(ConnectionSession):
             if temp_turn == turn: return
 
     def flush(self):
-        self.forward(flushing=True)
+        self.broadcast(flushing=True)
         self.application.finish()
 
 class UDPConnectionSession(ConnectionSession):
@@ -866,8 +829,7 @@ class Wireshark(Debugger):
         else:
             session = self.__tcp_sessions.get(header.socket_uuid)
         session.accept(header)
-        if header.ipv4.frame_number % 10 == 0:
-            session.forward()
+        session.broadcast()
 
     def __decode_udp(self, ipv4: IPv4Header, data: bytes):
         stream = MemoryStream(data=data)
@@ -955,3 +917,4 @@ class Wireshark(Debugger):
             session.flush()
         for _, session in self.__udp_sessions.items():
             session.flush()
+

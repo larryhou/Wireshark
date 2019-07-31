@@ -311,7 +311,7 @@ class ArenaApplication(ClientApplication):
                 self.tunnel.set_src_client(b'abcd', apollo.src_port)
                 self.tunnel.set_dst_client(b'dcba', apollo.dst_port)
             self.tunnel.accept(apollo)
-            self.tunnel.forward()
+            self.tunnel.broadcast()
 
     def finish(self):
         self.tunnel.flush()

@@ -756,7 +756,7 @@ class TCPConnectionSession(ConnectionSession):
             if not self.application.decoding and updated:
                 self.cursor = None
                 turn = 1 - turn
-            if temp_turn == turn: return
+            if temp_turn == turn and not flushing: return
 
     def flush(self):
         self.broadcast(flushing=True)

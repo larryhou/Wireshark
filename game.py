@@ -160,6 +160,7 @@ class ClientApplication(NetworkApplication):
                 serializer = self.command_map.get(protocol.cmd)  # type: object
                 payload = self.stream.read(protocol.len - protocol.header) if protocol.len > protocol.header else b''
                 if serializer:
+                    if self.debug: print(binascii.hexlify(payload))
                     message = getattr(serializer, 'FromString')(payload)  # type: object
                     print(message.__class__.__name__, protocol)
                     data = dict_to_protobuf.protobuf_to_dict(message, use_enum_labels=True)

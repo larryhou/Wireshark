@@ -85,13 +85,12 @@ class ClientApplication(NetworkApplication):
         changed = False
         if not os.path.exists(python_out):
             os.makedirs(python_out)
-        else:
-            for proto_name in os.listdir(proto_path):
-                if not proto_name.endswith('.proto'): continue
-                module_name = re.sub(r'\.proto$', '_pb2.py', proto_name)
-                if not os.path.exists(os.path.join(python_out, module_name)):
-                    changed = True
-                    break
+        for proto_name in os.listdir(proto_path):
+            if not proto_name.endswith('.proto'): continue
+            module_name = re.sub(r'\.proto$', '_pb2.py', proto_name)
+            if not os.path.exists(os.path.join(python_out, module_name)):
+                changed = True
+                break
         if changed:
             command = 'protoc --proto_path={} --python_out={} {}/*.proto'.format(proto_path, python_out, proto_path)
             assert os.system(command) == 0
@@ -135,7 +134,7 @@ class ClientApplication(NetworkApplication):
     def decode_protocol(self):
         stage = 0
         length = self.stream.length
-        protocol: ClientProtocol
+        protocol: ClientProtocol = None
         self.print('offset={} length={} header={}\n'.format(self.stream.position, self.stream.length, self.header))
         while self.stream.position + self.header < length:
             offset = self.stream.position
@@ -161,6 +160,7 @@ class ClientApplication(NetworkApplication):
                 serializer = self.command_map.get(protocol.cmd)  # type: object
                 payload = self.stream.read(protocol.len - protocol.header) if protocol.len > protocol.header else b''
                 if serializer:
+                    if self.debug: print(binascii.hexlify(payload))
                     message = getattr(serializer, 'FromString')(payload)  # type: object
                     print(message.__class__.__name__, protocol)
                     data = dict_to_protobuf.protobuf_to_dict(message, use_enum_labels=True)
@@ -313,7 +313,7 @@ class ArenaApplication(ClientApplication):
                 self.tunnel.set_src_client(b'abcd', apollo.src_port)
                 self.tunnel.set_dst_client(b'dcba', apollo.dst_port)
             self.tunnel.accept(apollo)
-            self.tunnel.forward()
+            self.tunnel.broadcast()
 
     def finish(self):
         self.tunnel.flush()

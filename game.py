@@ -181,13 +181,14 @@ class LogicApplication(ClientApplication):
         self.uin:int = 0
 
     def register_command_map(self):
-        command_enum = self.module_map.get('ZoneSvrCmd')
         message_map = {}
-        for name, value in command_enum.items():  # type: str, int
-            message_name = ''.join([x.title() for x in name.split('_')])
-            message_class = self.module_map.get(message_name)
-            if not message_class: continue
-            message_map[value] = message_class
+        for enum_name in ('HttpApiSvrCmd', 'ZoneSvrCmd'):
+            command_enum = self.module_map.get(enum_name)
+            for name, value in command_enum.items():  # type: str, int
+                message_name = ''.join([x.title() for x in name.split('_')])
+                message_class = self.module_map.get(message_name)
+                if not message_class: continue
+                message_map[value] = message_class
         self.command_map = message_map
 
     def check_qualified(self, protocol:LogicProtocol)->bool:
